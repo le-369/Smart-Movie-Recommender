@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>电影推荐系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            background: url('/static/image.jpg') no-repeat center center fixed;
+            background-size: cover;
+            color: #e5e7eb;
+            font-family: 'Inter', sans-serif;
+        }
+        .movie-card {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            background-color: rgba(31, 41, 55, 0.9); /* 半透明背景 */
+        }
+        .movie-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
+        }
+        .hero-bg {
+            background: rgba(17, 24, 39, 0.7); /* 半透明覆盖层 */
+            padding: 16px;
+        }
+        .search-results {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: rgba(31, 41, 55, 0.9);
+            z-index: 10;
+            max-height: 300px;
+            overflow-y: auto;
+            border-radius: 0 0 4px 4px;
+        }
+        .modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 30;
+        }
+        .modal-content {
+            background: rgba(31, 41, 55, 0.9);
+            padding: 20px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 500px;
+        }
+        .modal-content select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            background: #111827;
+            color: #e5e7eb;
+            border: 1px solid #4b5563;
+            border-radius: 4px;
+        }
+        .movie-card img {
+            object-fit: cover;
+            width: 100%;
+            height: 100%;
+        }
+        input, select, button {
+            background-color: rgba(31, 41, 55, 0.9);
+            color: #e5e7eb;
+            border: 1px solid #4b5563;
+        }
+        #recommendations-section, #trending-section {
+            background-color: rgba(34, 47, 78, 0.9);  /* 深灰蓝色调 */
+            padding: 30px; /* 增加内边距 */
+            border-radius: 15px; /* 更大圆角 */
+            margin: 0 auto;
+            max-width: 1400px; /* 更宽 */
+        }
+        #recommendations-grid, .trending-grid {
+            background-color: transparent; /* 网格内透明 */
+        }
+    </style>
+</head>
+<body>
+    <nav class="bg-gray-900 p-4 sticky top-0 z-20">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-white">电影推荐</h1>
+            <div class="flex space-x-4 items-center">
+                {% if user %}
+                <span class="text-gray-300">欢迎, {{ user.username }}</span>
+                <form method="POST" action="/logout">
+                    <button type="submit" class="text-gray-300 hover:text-white">登出</button>
+                </form>
+                {% else %}
+                <button id="login-btn" class="text-gray-300 hover:text-white">登录</button>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <section class="hero-bg py-16 text-center">
+        <div class="container mx-auto">
+            <h2 class="text-4xl font-bold mb-4">发现你的下一部电影</h2>
+            <p class="text-lg mb-6">输入你的偏好，获取个性化推荐</p>
+            <form method="POST" id="recommend-form" class="max-w-2xl mx-auto space-y-4">
+                <div class="relative">
+                    <input type="text" name="search_query" id="search-query" placeholder="搜索电影..." class="w-full p-3 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <div id="search-results" class="search-results hidden"></div>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <input type="text" name="description" id="description" value="{{ request.form.get('description', '') }}" placeholder="描述你的喜好，如‘科幻，喜剧’" class="flex-1 p-3 rounded">
+                    <button type="button" id="select-genres-btn" class="bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700">选择类型</button>
+                </div>
+                <select name="recommendation_type" id="recommendation-type" class="w-full p-3 rounded">
+                    <option value="description" {% if request.form.get('recommendation_type') == 'description' %}selected{% endif %}>基于描述</option>
+                    <option value="hybrid" {% if request.form.get('recommendation_type') == 'hybrid' %}selected{% endif %}>混合推荐</option>
+                </select>
+                <button type="submit" id="submit-btn" class="w-full bg-blue-600 text-white px-6 py-3 rounded hover:bg-blue-700">获取推荐</button>
+            </form>
+        </div>
+    </section>
+
+    <div id="genre-modal" class="modal">
+        <div class="modal-content">
+            <h2 class="text-2xl font-bold mb-4">选择电影类型</h2>
+            <select id="genre-select" multiple size="10">
+                {% for genre in genres %}
+                <option value="{{ genre }}">{{ '科幻 (Sci-Fi)' if genre == 'Sci-Fi' else '动作 (Action)' if genre == 'Action' else '冒险 (Adventure)' if genre == 'Adventure' else '动画 (Animation)' if genre == 'Animation' else '传记 (Biographical)' if genre == 'Biographical' else '儿童 (Children)' if genre == 'Children' else "儿童向 (Children's)" if genre == "Children's" else '喜剧 (Comedy)' if genre == 'Comedy' else '犯罪 (Crime)' if genre == 'Crime' else '纪录片 (Documentary)' if genre == 'Documentary' else '剧情 (Drama)' if genre == 'Drama' else '奇幻 (Fantasy)' if genre == 'Fantasy' else '黑色电影 (Film-Noir)' if genre == 'Film-Noir' else '恐怖 (Horror)' if genre == 'Horror' else 'IMAX (IMAX)' if genre == 'IMAX' else '音乐 (Musical)' if genre == 'Musical' else '悬疑 (Mystery)' if genre == 'Mystery' else '其他 (Other)' if genre == 'Other' else '心理 (Psychological)' if genre == 'Psychological' else '爱情 (Romance)' if genre == 'Romance' else '超级英雄 (Superhero)' if genre == 'Superhero' else '惊悚 (Thriller)' if genre == 'Thriller' else '战争 (War)' if genre == 'War' else '西部 (Western)' if genre == 'Western' else genre }}</option>
+                {% endfor %}
+            </select>
+            <button id="save-genres-btn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 mt-4">保存</button>
+            <button id="cancel-genres-btn" class="text-gray-300 hover:text-white mt-2">取消</button>
+        </div>
+    </div>
+
+    {% if error %}
+    <div class="container mx-auto p-4">
+        <div class="bg-red-600 text-white p-4 rounded">{{ error }}</div>
+    </div>
+    {% endif %}
+
+    <!-- 推荐结果 -->
+    {% if recommendations and recommendations|length > 0 %}
+    <section id="recommendations-section" class="container mx-auto py-8">
+        <h2 class="text-3xl font-bold mb-4">推荐电影</h2>
+        <div id="recommendations-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {% for rec in recommendations %}
+            <div class="movie-card rounded overflow-hidden">
+                <div class="h-48 bg-gray-700 flex items-center justify-center">
+                    <img src="{{ rec.poster_url }}" alt="{{ rec.title }}" class="w-full h-full object-cover">
+                </div>
+                <div class="p-4">
+                    <h3 class="text-lg font-semibold">{{ rec.title }}</h3>
+                    <p class="text-sm text-gray-400">评分: {{ rec.vote_average }}/5</p>
+                    <p class="text-sm text-gray-400">{{ rec.description|truncate(100, true, '...') }}</p>
+                    <button class="text-blue-400 hover:underline mt-2" onclick="getMovieInfo({{ rec.movieId }})">查看详情</button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- 热门电影 -->
+    {% if trending and trending|length > 0 %}
+    <section id="trending-section" class="container mx-auto py-8">
+        <h2 class="text-3xl font-bold mb-4">热门电影 <form method="POST" action="/" style="display: inline;"><button type="submit" name="refresh_trending" value="true" class="bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700">刷新</button></form></h2>
+        <div class="trending-grid grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {% for movie in trending %}
+            <div class="movie-card rounded overflow-hidden">
+                <div class="h-48 bg-gray-700 flex items-center justify-center">
+                    <img src="{{ movie.poster_url }}" alt="{{ movie.title }}" class="w-full h-full object-cover">
+                </div>
+                <div class="p-4">
+                    <h3 class="text-lg font-semibold">{{ movie.title }}</h3>
+                    <p class="text-sm text-gray-400">评分: {{ movie.vote_average }}/5</p>
+                    <button class="text-blue-400 hover:underline mt-2" onclick="getMovieInfo({{ movie.movieId }})">查看详情</button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% else %}
+    <section class="container mx-auto py-8">
+        <p class="text-center text-gray-400">暂无热门电影数据</p>
+    </section>
+    {% endif %}
+
+    <!-- 历史记录 -->
+    {% if history and history|length > 0 %}
+    <section class="container mx-auto py-8">
+        <h2 class="text-3xl font-bold mb-4">推荐历史</h2>
+        <div class="space-y-4">
+            {% for entry in history %}
+            <div class="bg-gray-800 p-4 rounded">
+                <p class="text-sm text-gray-400">{{ entry.time }} - {{ entry.type }}</p>
+                <ul class="list-disc pl-5">
+                    {% for rec in entry.results %}
+                    <li>{{ rec.title }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <div id="login-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-30">
+        <div class="bg-gray-900 p-6 rounded max-w-sm w-full">
+            <h2 class="text-2xl font-bold mb-4">登录</h2>
+            <form id="login-form" method="POST" action="/login" class="space-y-4">
+                <input type="text" name="username" placeholder="用户名" class="w-full p-3 rounded bg-gray-800 text-white border border-gray-700">
+                <input type="password" name="password" placeholder="密码" class="w-full p-3 rounded bg-gray-800 text-white border border-gray-700">
+                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">登录</button>
+                <button type="button" id="login-close" class="text-gray-300 hover:text-white">取消</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="movie-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-30">
+        <div class="bg-gray-900 p-6 rounded max-w-lg w-full">
+            <h2 id="modal-title" class="text-2xl font-bold mb-4"></h2>
+            <img id="modal-poster" class="w-full h-48 object-cover mb-4 rounded" alt="电影海报">
+            <p id="modal-description" class="mb-4"></p>
+            <p id="modal-director" class="mb-4">导演: <span id="modal-director-name"></span></p>
+            <p id="modal-rating" class="mb-4"></p>
+            <button id="modal-close" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">关闭</button>
+        </div>
+    </div>
+
+    <div id="genre-modal" class="modal">
+        <div class="modal-content">
+            <h2 class="text-2xl font-bold mb-4">选择电影类型</h2>
+            <select id="genre-select" multiple size="10">
+                {% for genre in genres %}
+                <option value="{{ genre }}">{{ '科幻 (Sci-Fi)' if genre == 'Sci-Fi' else '动作 (Action)' if genre == 'Action' else '冒险 (Adventure)' if genre == 'Adventure' else '动画 (Animation)' if genre == 'Animation' else '传记 (Biographical)' if genre == 'Biographical' else '儿童 (Children)' if genre == 'Children' else "儿童向 (Children's)" if genre == "Children's" else '喜剧 (Comedy)' if genre == 'Comedy' else '犯罪 (Crime)' if genre == 'Crime' else '纪录片 (Documentary)' if genre == 'Documentary' else '剧情 (Drama)' if genre == 'Drama' else '奇幻 (Fantasy)' if genre == 'Fantasy' else '黑色电影 (Film-Noir)' if genre == 'Film-Noir' else '恐怖 (Horror)' if genre == 'Horror' else 'IMAX (IMAX)' if genre == 'IMAX' else '音乐 (Musical)' if genre == 'Musical' else '悬疑 (Mystery)' if genre == 'Mystery' else '其他 (Other)' if genre == 'Other' else '心理 (Psychological)' if genre == 'Psychological' else '爱情 (Romance)' if genre == 'Romance' else '超级英雄 (Superhero)' if genre == 'Superhero' else '惊悚 (Thriller)' if genre == 'Thriller' else '战争 (War)' if genre == 'War' else '西部 (Western)' if genre == 'Western' else genre }}</option>
+                {% endfor %}
+            </select>
+            <button id="save-genres-btn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 mt-4">保存</button>
+            <button id="cancel-genres-btn" class="text-gray-300 hover:text-white mt-2">取消</button>
+        </div>
+    </div>
+
+    <script>
+        const searchInput = document.getElementById('search-query');
+        const searchResults = document.getElementById('search-results');
+        const descriptionInput = document.getElementById('description');
+        const genresSelect = document.getElementById('genre-select');
+        const genreModal = document.getElementById('genre-modal');
+        const saveGenresBtn = document.getElementById('save-genres-btn');
+        const cancelGenresBtn = document.getElementById('cancel-genres-btn');
+        const selectGenresBtn = document.getElementById('select-genres-btn');
+        const submitBtn = document.getElementById('submit-btn');
+        const recommendForm = document.getElementById('recommend-form');
+
+        searchInput.addEventListener('input', () => {
+            const query = searchInput.value.trim();
+            if (query.length < 2) {
+                searchResults.classList.add('hidden');
+                searchResults.innerHTML = '';
+                return;
+            }
+            fetch('/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `search_query=${encodeURIComponent(query)}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                searchResults.innerHTML = '';
+                if (data.error) {
+                    searchResults.innerHTML = `<div class="p-2">${data.error}</div>`;
+                } else if (data.recommendations) {
+                    data.recommendations.forEach(movie => {
+                        const div = document.createElement('div');
+                        div.className = 'p-2 hover:bg-gray-700 cursor-pointer';
+                        div.textContent = movie.title;
+                        div.onclick = () => {
+                            descriptionInput.value = movie.title;
+                            recommendForm.submit();
+                            searchResults.classList.add('hidden');
+                        };
+                        searchResults.appendChild(div);
+                    });
+                } else {
+                    searchResults.innerHTML = '<div class="p-2">未找到匹配的电影</div>';
+                }
+                searchResults.classList.remove('hidden');
+            })
+            .catch(error => {
+                searchResults.innerHTML = '<div class="p-2">搜索出错，请稍后重试</div>';
+                console.error('搜索失败:', error);
+            });
+        });
+
+        selectGenresBtn.addEventListener('click', () => {
+            genreModal.style.display = 'flex';
+        });
+
+        saveGenresBtn.addEventListener('click', () => {
+            const selectedGenres = Array.from(genresSelect.selectedOptions).map(option => option.value).join(', ');
+            descriptionInput.value = selectedGenres;
+            document.getElementById('recommendation-type').value = 'description';
+            recommendForm.submit();
+        });
+
+        cancelGenresBtn.addEventListener('click', () => {
+            genreModal.style.display = 'none';
+        });
+
+        const loginModal = document.getElementById('login-modal');
+        const loginBtn = document.getElementById('login-btn');
+        const loginClose = document.getElementById('login-close');
+        const loginForm = document.getElementById('login-form');
+
+        if (loginBtn) {
+            loginBtn.addEventListener('click', () => {
+                loginModal.classList.remove('hidden');
+            });
+        }
+        loginClose.addEventListener('click', () => {
+            loginModal.classList.add('hidden');
+        });
+
+        async function getMovieInfo(movieId) {
+            try {
+                const response = await fetch('/get_movie_info', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `movie_id=${movieId}`
+                });
+                const data = await response.json();
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+                document.getElementById('modal-title').textContent = data.title || '';
+                document.getElementById('modal-poster').src = data.poster_url || 'https://via.placeholder.com/300x450';
+                document.getElementById('modal-description').textContent = data.description || '';
+                document.getElementById('modal-director-name').textContent = data.director || '';
+                document.getElementById('modal-rating').textContent = `评分: ${data.vote_average || 0}/5`;
+                document.getElementById('movie-modal').classList.remove('hidden');
+            } catch (e) {
+                alert('无法加载电影详情，请稍后重试');
+                console.error('获取详情失败:', e);
+            }
+        }
+
+        document.getElementById('modal-close').addEventListener('click', () => {
+            document.getElementById('movie-modal').classList.add('hidden');
+        });
+    </script>
+</body>
+</html>
